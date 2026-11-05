@@ -9,6 +9,17 @@ interface AuthSettingsModalProps {
   onLoginSuccess?: (email: string) => void;
 }
 
+const DEFAULT_USERNAME_DOMAIN = '@app.local';
+
+/**
+ * 若使用者只輸入簡單帳號名（不含 @），自動補上預設網域後綴以通過 Supabase Auth 格式要求
+ */
+function normalizeLoginIdentifier(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return '';
+  return trimmed.includes('@') ? trimmed : `${trimmed}${DEFAULT_USERNAME_DOMAIN}`;
+}
+
 export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
   isOpen,
   onClose,
@@ -17,7 +28,7 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
 }) => {
   const { isConfigured } = getSupabaseConfig();
 
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -43,20 +54,27 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
     setAuthError(null);
     setLoading(true);
     try {
+      const resolvedEmail = normalizeLoginIdentifier(username);
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: resolvedEmail,
         password,
       });
       if (error) throw error;
 
       // 輔助觸發瀏覽器 Credential Management API 記憶帳號密碼
-      if ('credentials' in navigator && (window as unknown as { PasswordCredential?: new (form: HTMLFormElement) => Credential }).PasswordCredential) {
+      if (
+        'credentials' in navigator &&
+        (window as unknown as { PasswordCredential?: new (form: HTMLFormElement) => Credential })
+          .PasswordCredential
+      ) {
         try {
-          const PasswordCredentialCtor = (window as unknown as { PasswordCredential: new (form: HTMLFormElement) => Credential }).PasswordCredential;
+          const PasswordCredentialCtor = (
+            window as unknown as { PasswordCredential: new (form: HTMLFormElement) => Credential }
+          ).PasswordCredential;
           const cred = new PasswordCredentialCtor(e.currentTarget);
           await navigator.credentials.store(cred);
         } catch {
-          // 忽略部分瀏覽器不支援之情況，標準 form name/autocomplete 已支援自動記憶
+          // 標準 form name/autocomplete 已支援自動記憶
         }
       }
 
@@ -76,6 +94,8 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
     setUserEmail(null);
     onClose();
   };
+
+  const displayAccount = userEmail ? userEmail.split('@')[0] : '';
 
   return (
     <div
@@ -111,8 +131,8 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
               </div>
               <div className="space-y-1">
                 <p className="text-xs text-ink-600 font-serif">目前登入帳號</p>
-                <p className="text-sm font-bold text-ink-900 break-all">
-                  {userEmail}
+                <p className="text-base font-bold text-ink-900 break-all">
+                  {displayAccount}
                 </p>
               </div>
               <p className="text-xs text-emerald-700 bg-emerald-50/80 py-2 px-3 rounded-xl border border-emerald-200">
@@ -128,7 +148,6 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
               </button>
             </div>
           ) : (
-            /* 採用標準密碼儲存格屬性 id / name / autoComplete，讓 Chrome / Safari / iOS 密碼鑰匙圈自動記住網站帳密 */
             <form
               id="login-form"
               name="login"
@@ -144,7 +163,7 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
                 </div>
               ) : (
                 <p className="text-xs text-ink-600 font-serif leading-relaxed">
-                  請登入管理員帳號以新增、編輯或刪除書法字帖（瀏覽器可自動記憶此組帳密）。
+                  請輸入帳號與密碼以新增或管理書法字帖。
                 </p>
               )}
 
@@ -159,18 +178,17 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
                   htmlFor="login-username"
                   className="block text-xs font-serif font-bold text-ink-800 mb-1"
                 >
-                  帳號（電子信箱）
+                  帳號
                 </label>
                 <input
                   id="login-username"
                   name="username"
-                  type="email"
+                  type="text"
                   required
                   autoComplete="username"
-                  inputMode="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="請輸入帳號名稱"
                   className="w-full min-h-[44px] px-3.5 rounded-xl bg-white border border-paper-300 text-sm text-ink-900 focus:outline-none focus:border-ink-900"
                 />
               </div>
