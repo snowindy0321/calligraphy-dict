@@ -17,6 +17,7 @@ import { CalligraphyCard } from './components/CalligraphyCard';
 import { UploadCropModal } from './components/UploadCropModal';
 import { EntryDetailModal } from './components/EntryDetailModal';
 import { AuthSettingsModal } from './components/AuthSettingsModal';
+import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 
 export const App: React.FC = () => {
   const [selectedInitial, setSelectedInitial] = useState<string>('ALL');
@@ -106,7 +107,6 @@ export const App: React.FC = () => {
         map.delete(sym);
       }
     }
-    // 若有非標準首字亦保留於末尾
     for (const [key, list] of map.entries()) {
       if (list.length > 0) {
         ordered.push({ initial: key, items: list });
@@ -135,7 +135,6 @@ export const App: React.FC = () => {
 
     const observer = new IntersectionObserver(
       (observedEntries) => {
-        // 找出目前進入畫面頂部觀察區的分組
         const visible = observedEntries
           .filter((e) => e.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
@@ -146,7 +145,6 @@ export const App: React.FC = () => {
         }
       },
       {
-        // 當分組標題進入視窗上半部時觸發高亮
         rootMargin: '-110px 0px -65% 0px',
         threshold: 0,
       }
@@ -195,7 +193,6 @@ export const App: React.FC = () => {
     loadEntries();
   };
 
-  // 取得顯示用帳號名稱（取 @ 前綴或完整顯示）
   const displayUsername = userEmail ? userEmail.split('@')[0] : null;
 
   return (
@@ -382,7 +379,7 @@ export const App: React.FC = () => {
         onDeleted={handleDeleted}
       />
 
-      {/* 彈窗：會員登入（若因點擊新增觸發登入，登入成功後自動開啟新增視窗） */}
+      {/* 彈窗：會員登入 */}
       <AuthSettingsModal
         isOpen={isSettingsOpen}
         onClose={() => {
@@ -397,6 +394,9 @@ export const App: React.FC = () => {
           }
         }}
       />
+
+      {/* 手機瀏覽時彈出安裝 PWA App 提示橫幅 */}
+      <PwaInstallPrompt />
     </div>
   );
 };
