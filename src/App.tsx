@@ -194,12 +194,13 @@ export const App: React.FC = () => {
   };
 
   const displayUsername = userEmail ? userEmail.split('@')[0] : null;
+  const hasSideIndex = groupedSections.length > 0;
 
   return (
     <div className="min-h-screen flex flex-col bg-paper-50 text-ink-900">
       {/* 1A. 頂部 Header 簡化（h-14 px-4 單行不換行，左側 Logo + 標題，右側使用者帳號按鈕） */}
       <header className="bg-paper-100/95 border-b border-paper-200">
-        <div className="max-w-6xl mx-auto flex justify-between items-center h-14 px-4">
+        <div className="max-w-6xl mx-auto flex justify-between items-center h-14 px-4 sm:px-6">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 rounded-lg bg-cinnabar-600 text-paper-50 font-serif font-bold text-base flex items-center justify-center shadow-xs shrink-0 select-none">
               帖
@@ -234,10 +235,10 @@ export const App: React.FC = () => {
         availableInitials={availableInitialsSet}
       />
 
-      {/* 主內容區（預留右側給側邊注音索引列） */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 pr-10 sm:pr-14 py-4 space-y-4">
-        {/* 1B. 搜尋列精簡（移除統計列，簡化 Placeholder） */}
-        <div className="relative">
+      {/* 主內容區：與頂部 Header 對齊置中並水平填滿（px-4 sm:px-6） */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-4 space-y-4">
+        {/* 1B. 搜尋列：與下方卡片水平對齊置中並 100% 填滿 */}
+        <div className="relative w-full">
           <Search className="w-4 h-4 text-ink-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="search"
@@ -260,19 +261,19 @@ export const App: React.FC = () => {
 
         {/* 錯誤提示 */}
         {errorMessage && (
-          <div className="p-3.5 rounded-2xl bg-cinnabar-50 border border-cinnabar-600/30 text-cinnabar-700 text-xs sm:text-sm">
+          <div className="w-full p-3.5 rounded-2xl bg-cinnabar-50 border border-cinnabar-600/30 text-cinnabar-700 text-xs sm:text-sm">
             {errorMessage}
           </div>
         )}
 
-        {/* 1C & 5A. 空白狀態緊湊化 / 通訊錄樣式注音分組垂直渲染 */}
+        {/* 1C & 5A. 空白狀態緊湊化（與搜尋框對齊置中並水平填滿） / 通訊錄樣式注音分組垂直渲染 */}
         {isLoading ? (
-          <div className="py-14 flex flex-col items-center justify-center gap-2.5 text-ink-600">
+          <div className="w-full py-14 flex flex-col items-center justify-center gap-2.5 text-ink-600">
             <Loader2 className="w-6 h-6 animate-spin text-cinnabar-600" />
             <p className="font-serif text-xs">載入字帖中...</p>
           </div>
-        ) : groupedSections.length === 0 ? (
-          <div className="py-10 px-4 text-center bg-white/70 rounded-2xl border border-paper-200 flex flex-col items-center justify-center gap-2">
+        ) : !hasSideIndex ? (
+          <div className="w-full py-10 px-4 text-center bg-white/70 rounded-2xl border border-paper-200 flex flex-col items-center justify-center gap-2">
             <div className="w-10 h-10 rounded-xl bg-paper-100 text-ink-600 flex items-center justify-center">
               <BookOpen className="w-5 h-5" />
             </div>
@@ -281,7 +282,7 @@ export const App: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="space-y-6 pb-20">
+          <div className="space-y-6 pb-24 pr-8 sm:pr-10">
             {groupedSections.map((group) => (
               <section
                 key={group.initial}
@@ -318,8 +319,8 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* 5B. 側邊快速索引列（Alphabet Index Bar，手機端浮動於右側、電腦端固定於側邊） */}
-      {groupedSections.length > 0 && (
+      {/* 5B. 側邊快速索引列（Alphabet Index Bar） */}
+      {hasSideIndex && (
         <nav
           aria-label="側邊注音分組快速索引"
           className="fixed right-1.5 sm:right-3 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center py-1.5 px-1 rounded-full bg-paper-100/90 backdrop-blur-xs border border-paper-200 shadow-scroll max-h-[70vh] overflow-y-auto no-scrollbar"
@@ -345,15 +346,15 @@ export const App: React.FC = () => {
         </nav>
       )}
 
-      {/* 右下角紅色懸浮新增按鈕 (FAB) */}
+      {/* 右下角紅色懸浮新增按鈕 (FAB)：手機與電腦端統一採用 56x56px (w-14 h-14) 飽滿圓角方塊比例 */}
       <button
         type="button"
         onClick={handleTriggerAdd}
-        className="fixed right-4 bottom-5 z-30 w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-cinnabar-600 hover:bg-cinnabar-700 text-white shadow-lg flex items-center justify-center active:scale-95 transition-all"
+        className="fixed right-5 bottom-6 z-30 w-14 h-14 rounded-2xl bg-cinnabar-600 hover:bg-cinnabar-700 text-white shadow-xl flex items-center justify-center active:scale-95 transition-all"
         aria-label="新增書法字帖"
         title="新增書法字帖"
       >
-        <Plus className="w-6 h-6" />
+        <Plus className="w-7 h-7 stroke-[2.5]" />
       </button>
 
       {/* 成功提示 Toast */}

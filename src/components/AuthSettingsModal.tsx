@@ -98,14 +98,9 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
   const displayAccount = userEmail ? userEmail.split('@')[0] : '';
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/70 backdrop-blur-xs p-4 overflow-y-auto"
-      onClick={onClose}
-    >
-      <div
-        className="bg-paper-50 w-full max-w-sm rounded-3xl border border-paper-200 shadow-2xl overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
+    /* 移除背景遮罩的 onClick={onClose}，確保點擊旁邊空白處不會誤關登入視窗 */
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/70 backdrop-blur-xs p-4 overflow-y-auto">
+      <div className="bg-paper-50 w-full max-w-sm rounded-3xl border border-paper-200 shadow-2xl overflow-hidden">
         <div className="px-5 py-3.5 bg-paper-100 border-b border-paper-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Lock className="w-4 h-4 text-cinnabar-600" />
