@@ -3,7 +3,7 @@ import {
   Search,
   Plus,
   BookOpen,
-  Settings,
+  User,
   X,
   Sparkles,
   Loader2,
@@ -109,11 +109,11 @@ export const App: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsSettingsOpen(true)}
-              className="min-w-[44px] min-h-[44px] px-3 rounded-xl bg-paper-50 border border-paper-200 text-ink-800 hover:bg-paper-200 transition-colors flex items-center justify-center gap-1.5 text-xs font-serif"
-              title="Supabase 設定與管理員驗證"
+              className="min-w-[44px] min-h-[44px] px-3.5 rounded-xl bg-paper-50 border border-paper-200 text-ink-800 hover:bg-paper-200 transition-colors flex items-center justify-center gap-1.5 text-xs font-serif"
+              title="會員登入"
             >
-              <Settings className="w-4 h-4 text-ink-600" />
-              <span className="hidden sm:inline">資料庫 / 驗證</span>
+              <User className="w-4 h-4 text-ink-600" />
+              <span className="hidden sm:inline">登入</span>
             </button>
 
             <button
