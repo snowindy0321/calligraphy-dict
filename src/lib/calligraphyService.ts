@@ -253,11 +253,17 @@ export async function deleteCalligraphyEntry(entry: CalligraphyEntry): Promise<v
     throw new Error(`刪除失敗：${error.message}`);
   }
 
-  // 若圖片位於 calligraphy-images bucket，同步清理檔案
+  // 若圖片位於 calligraphy-images bucket，同步從伺服器 Storage 徹底刪除實體圖檔，避免浪費空間
   const marker = `/storage/v1/object/public/${STORAGE_BUCKET}/`;
   const idx = entry.image_url.indexOf(marker);
   if (idx !== -1) {
-    const storagePath = entry.image_url.substring(idx + marker.length);
-    await supabase.storage.from(STORAGE_BUCKET).remove([storagePath]);
+    const rawPath = entry.image_url.substring(idx + marker.length).split('?')[0];
+    const storagePath = decodeURIComponent(rawPath);
+    const { error: storageError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .remove([storagePath]);
+    if (storageError) {
+      console.warn('清理 Storage 圖檔時發生警告：', storageError.message);
+    }
   }
 }

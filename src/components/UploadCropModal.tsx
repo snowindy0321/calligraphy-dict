@@ -5,9 +5,7 @@ import {
   Upload,
   X,
   Check,
-  RotateCcw,
   ZoomIn,
-  Sparkles,
   Loader2,
 } from 'lucide-react';
 import { getCroppedWebpBlob, PixelCrop } from '../utils/cropImage';
@@ -16,6 +14,7 @@ import {
   SCRIPT_TYPES,
   extractBopomofoInitial,
 } from '../constants/bopomofo';
+import { getZhuyinCandidates } from '../utils/charToZhuyin';
 import { createCalligraphyEntry } from '../lib/calligraphyService';
 import { CalligraphyEntry } from '../types';
 
@@ -34,26 +33,21 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 步驟與影像狀態
+  // 影像與裁切狀態
   const [rawImageSrc, setRawImageSrc] = useState<string | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<PixelCrop | null>(null);
 
-  // 裁切並壓縮後的 WebP 成果
-  const [croppedBlob, setCroppedBlob] = useState<Blob | null>(null);
-  const [croppedPreviewUrl, setCroppedPreviewUrl] = useState<string | null>(null);
-  const [croppedSizeKB, setCroppedSizeKB] = useState<number | null>(null);
-
-  // 表單欄位
+  // 表單欄位（書體預設為無 ''）
   const [charInput, setCharInput] = useState('');
   const [zhuyinInput, setZhuyinInput] = useState('');
+  const [zhuyinCandidates, setZhuyinCandidates] = useState<string[]>([]);
   const [sourceName, setSourceName] = useState('');
-  const [scriptType, setScriptType] = useState('行書');
+  const [scriptType, setScriptType] = useState('');
   const [showBopomofoPad, setShowBopomofoPad] = useState(false);
 
   // 處理狀態與錯誤訊息
-  const [isProcessingCrop, setIsProcessingCrop] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -61,22 +55,18 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
 
   const resetAll = useCallback(() => {
     if (rawImageSrc) URL.revokeObjectURL(rawImageSrc);
-    if (croppedPreviewUrl) URL.revokeObjectURL(croppedPreviewUrl);
     setRawImageSrc(null);
     setCrop({ x: 0, y: 0 });
     setZoom(1);
     setCroppedAreaPixels(null);
-    setCroppedBlob(null);
-    setCroppedPreviewUrl(null);
-    setCroppedSizeKB(null);
     setCharInput('');
     setZhuyinInput('');
+    setZhuyinCandidates([]);
     setSourceName('');
-    setScriptType('行書');
+    setScriptType('');
     setErrorMessage(null);
-    setIsProcessingCrop(false);
     setIsSubmitting(false);
-  }, [rawImageSrc, croppedPreviewUrl]);
+  }, [rawImageSrc]);
 
   const handleClose = () => {
     resetAll();
@@ -88,11 +78,8 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
     if (!file) return;
     setErrorMessage(null);
     if (rawImageSrc) URL.revokeObjectURL(rawImageSrc);
-    if (croppedPreviewUrl) URL.revokeObjectURL(croppedPreviewUrl);
     const objectUrl = URL.createObjectURL(file);
     setRawImageSrc(objectUrl);
-    setCroppedBlob(null);
-    setCroppedPreviewUrl(null);
     setZoom(1);
     setCrop({ x: 0, y: 0 });
   };
@@ -101,29 +88,25 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
     setCroppedAreaPixels(croppedPixels);
   }, []);
 
-  const handleConfirmCrop = async () => {
-    if (!rawImageSrc || !croppedAreaPixels) return;
-    setIsProcessingCrop(true);
-    setErrorMessage(null);
-    try {
-      const result = await getCroppedWebpBlob(rawImageSrc, croppedAreaPixels, 50 * 1024);
-      if (croppedPreviewUrl) URL.revokeObjectURL(croppedPreviewUrl);
-      setCroppedBlob(result.blob);
-      setCroppedPreviewUrl(result.previewUrl);
-      setCroppedSizeKB(result.sizeKB);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '裁切影像失敗');
-    } finally {
-      setIsProcessingCrop(false);
+  // 當輸入國字時，自動帶出標準注音與破音字候選
+  const handleCharChange = (val: string) => {
+    setCharInput(val);
+    const candidates = getZhuyinCandidates(val);
+    setZhuyinCandidates(candidates);
+    if (candidates.length > 0) {
+      setZhuyinInput(candidates[0]);
+    } else if (!val.trim()) {
+      setZhuyinInput('');
     }
   };
 
+  // 點擊下方儲存按鈕時，直接一併完成 1:1 裁切、WebP 壓縮與上傳
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!croppedBlob) {
-      setErrorMessage('請先選取照片並完成單字框選裁切');
+    if (!rawImageSrc || !croppedAreaPixels) {
+      setErrorMessage('請先選取或拍攝字帖照片');
       return;
     }
 
@@ -134,24 +117,33 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
     }
 
     if (!zhuyinInput.trim() || !detectedInitial) {
-      setErrorMessage('請輸入完整注音符號（例如：ㄩㄥˇ 或 ㄓㄨㄤ）');
+      setErrorMessage('請確認注音符號（例如：ㄩㄥˇ）');
       return;
     }
 
     setIsSubmitting(true);
     try {
+      // 1. 直接執行 Canvas 1:1 裁切並壓縮為 <= 50KB 的 WebP
+      const { blob, previewUrl } = await getCroppedWebpBlob(
+        rawImageSrc,
+        croppedAreaPixels,
+        50 * 1024
+      );
+      URL.revokeObjectURL(previewUrl);
+
+      // 2. 上傳至 Supabase Storage 並寫入資料庫
       const created = await createCalligraphyEntry({
         char: singleChar,
         zhuyin: zhuyinInput.trim(),
         source_name: sourceName.trim() || undefined,
         script_type: scriptType || undefined,
-        imageBlob: croppedBlob,
+        imageBlob: blob,
       });
       onSuccess(created);
       resetAll();
       onClose();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '儲存字帖時發生錯誤');
+      setErrorMessage(err instanceof Error ? err.message : '上傳字帖時發生錯誤');
     } finally {
       setIsSubmitting(false);
     }
@@ -163,19 +155,14 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-ink-900/70 backdrop-blur-xs p-0 sm:p-4 overflow-y-auto">
       <div className="bg-paper-50 w-full max-w-xl rounded-t-3xl sm:rounded-3xl border border-paper-200 shadow-2xl overflow-hidden max-h-[94vh] flex flex-col">
         {/* 頂部標題列 */}
-        <div className="px-5 py-4 bg-paper-100 border-b border-paper-200 flex items-center justify-between">
-          <div>
-            <h2 className="font-serif text-lg font-bold text-ink-900">
-              新增書法字帖
-            </h2>
-            <p className="text-xs text-ink-600">
-              拍照或選取碑帖 ➔ 1:1 框選單字 ➔ 輸入中文字與注音
-            </p>
-          </div>
+        <div className="px-5 py-3.5 bg-paper-100 border-b border-paper-200 flex items-center justify-between">
+          <h2 className="font-serif text-base sm:text-lg font-bold text-ink-900">
+            新增書法字帖
+          </h2>
           <button
             type="button"
             onClick={handleClose}
-            className="min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center text-ink-600 hover:bg-paper-200 transition-colors"
+            className="min-w-[40px] min-h-[40px] rounded-xl flex items-center justify-center text-ink-600 hover:bg-paper-200 transition-colors"
             aria-label="關閉視窗"
           >
             <X className="w-5 h-5" />
@@ -183,14 +170,13 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
         </div>
 
         {/* 內容捲動區 */}
-        <div className="p-5 overflow-y-auto space-y-5 flex-1">
+        <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
           {errorMessage && (
-            <div className="p-3.5 rounded-xl bg-cinnabar-50 border border-cinnabar-600/30 text-cinnabar-700 text-sm">
+            <div className="p-3 rounded-xl bg-cinnabar-50 border border-cinnabar-600/30 text-cinnabar-700 text-xs sm:text-sm">
               {errorMessage}
             </div>
           )}
 
-          {/* 隱藏檔案選取器（支援手機拍照與相簿） */}
           <input
             ref={fileInputRef}
             type="file"
@@ -199,35 +185,28 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
             className="hidden"
           />
 
-          {/* 步驟 1 & 2：圖片選取與 1:1 觸控裁切畫布 */}
+          {/* 圖片選取與 1:1 即時框選區（無須額外按確認裁切，點下方上傳自動一併裁切壓縮） */}
           {!rawImageSrc ? (
-            <div className="border-2 border-dashed border-paper-300 rounded-2xl bg-paper-100/50 p-8 text-center space-y-4">
-              <div className="w-14 h-14 rounded-2xl bg-paper-200/80 text-ink-800 mx-auto flex items-center justify-center">
-                <Camera className="w-7 h-7" />
+            <div className="border-2 border-dashed border-paper-300 rounded-2xl bg-paper-100/50 p-6 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-paper-200/80 text-ink-800 mx-auto flex items-center justify-center">
+                <Camera className="w-6 h-6" />
               </div>
-              <div className="space-y-1">
-                <p className="font-serif font-bold text-ink-900 text-base">
-                  拍攝字帖或從相簿選取圖片
-                </p>
-                <p className="text-xs text-ink-600">
-                  載入後可用手指拖曳、雙指縮放，從整頁碑帖中精準框出單字
-                </p>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="min-h-[48px] px-6 rounded-xl bg-ink-900 text-paper-50 font-serif font-bold text-sm flex items-center justify-center gap-2 hover:bg-ink-800 active:scale-98 transition-all shadow-sm"
-                >
-                  <Upload className="w-4 h-4" />
-                  選取碑帖照片 / 拍照
-                </button>
-              </div>
+              <p className="font-serif font-bold text-ink-900 text-sm">
+                拍攝字帖或從相簿選取圖片
+              </p>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="min-h-[44px] px-5 rounded-xl bg-ink-900 text-paper-50 font-serif font-bold text-sm inline-flex items-center justify-center gap-2 hover:bg-ink-800 active:scale-98 transition-all shadow-xs"
+              >
+                <Upload className="w-4 h-4" />
+                選取照片 / 拍照
+              </button>
             </div>
-          ) : !croppedPreviewUrl ? (
-            <div className="space-y-3">
+          ) : (
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between text-xs text-ink-600">
-                <span>請拖曳或雙指縮放，將單字置於 1:1 正方形框內</span>
+                <span>拖曳或雙指縮放框選單字（上傳時自動裁切壓縮）</span>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -237,8 +216,7 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
                 </button>
               </div>
 
-              {/* react-easy-crop 1:1 觸控裁切畫布 */}
-              <div className="relative w-full h-72 sm:h-80 bg-ink-900 rounded-2xl overflow-hidden border border-paper-300">
+              <div className="relative w-full h-64 sm:h-72 bg-ink-900 rounded-2xl overflow-hidden border border-paper-300">
                 <Cropper
                   image={rawImageSrc}
                   crop={crop}
@@ -251,8 +229,7 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
                 />
               </div>
 
-              {/* 縮放滑桿與確認裁切按鈕 */}
-              <div className="flex items-center gap-3 bg-paper-100 px-4 py-2.5 rounded-xl">
+              <div className="flex items-center gap-3 bg-paper-100 px-3.5 py-2 rounded-xl">
                 <ZoomIn className="w-4 h-4 text-ink-600 shrink-0" />
                 <input
                   type="range"
@@ -268,104 +245,40 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
                   {zoom.toFixed(1)}x
                 </span>
               </div>
-
-              <button
-                type="button"
-                onClick={handleConfirmCrop}
-                disabled={isProcessingCrop}
-                className="w-full min-h-[48px] rounded-xl bg-cinnabar-600 text-white font-serif font-bold text-sm flex items-center justify-center gap-2 hover:bg-cinnabar-700 transition-colors shadow-sm disabled:opacity-50"
-              >
-                {isProcessingCrop ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    正在轉換為最佳化 WebP...
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4" />
-                    完成框選並壓縮（WebP 0.85）
-                  </>
-                )}
-              </button>
-            </div>
-          ) : (
-            /* 裁切完成預覽區 */
-            <div className="flex items-center gap-4 p-3.5 rounded-2xl bg-white border border-paper-200">
-              <img
-                src={croppedPreviewUrl}
-                alt="裁切預覽"
-                className="w-24 h-24 rounded-xl object-contain border border-paper-200 bg-white shrink-0"
-              />
-              <div className="flex-1 min-w-0 space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    <Sparkles className="w-3 h-3" />
-                    WebP 已最佳化
-                  </span>
-                  {croppedSizeKB !== null && (
-                    <span className="text-xs text-ink-600 font-mono">
-                      {croppedSizeKB} KB (≤ 50KB)
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-ink-600">
-                  1:1 正方形單字影像已準備就緒，請於下方填寫字元與注音索引。
-                </p>
-                <div className="pt-1 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCroppedBlob(null);
-                      setCroppedPreviewUrl(null);
-                    }}
-                    className="min-h-[38px] px-3 rounded-lg bg-paper-100 text-ink-800 text-xs font-medium flex items-center gap-1.5 hover:bg-paper-200 transition-colors"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    重新框選
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="min-h-[38px] px-3 rounded-lg bg-paper-100 text-ink-800 text-xs font-medium hover:bg-paper-200 transition-colors"
-                  >
-                    更換照片
-                  </button>
-                </div>
-              </div>
             </div>
           )}
 
-          {/* 步驟 4：表單資訊填寫與自動提取注音首字 */}
-          <form id="calligraphy-upload-form" onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* 中文字（必填，單字） */}
+          {/* 表單資訊填寫 */}
+          <form id="calligraphy-upload-form" onSubmit={handleSubmit} className="space-y-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {/* 中文字（必填，輸入後自動帶出注音） */}
               <div>
-                <label className="block text-xs font-serif font-bold text-ink-800 mb-1.5">
-                  中文字 <span className="text-cinnabar-600">*</span>（單字）
+                <label className="block text-xs font-serif font-bold text-ink-800 mb-1">
+                  中文字 <span className="text-cinnabar-600">*</span>（輸入自動帶出注音）
                 </label>
                 <input
                   type="text"
                   required
                   maxLength={2}
                   value={charInput}
-                  onChange={(e) => setCharInput(e.target.value)}
+                  onChange={(e) => handleCharChange(e.target.value)}
                   placeholder="例如：永"
-                  className="w-full min-h-[46px] px-3.5 rounded-xl bg-white border border-paper-300 font-serif text-lg text-ink-900 focus:outline-none focus:border-ink-900"
+                  className="w-full min-h-[44px] px-3.5 rounded-xl bg-white border border-paper-300 font-serif text-lg text-ink-900 focus:outline-none focus:border-ink-900"
                 />
               </div>
 
-              {/* 注音符號（必填）+ 自動提取 bopomofo_initial 預覽 */}
+              {/* 注音符號（自動填入，若有破音字可一鍵切換或手動微調） */}
               <div>
-                <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-serif font-bold text-ink-800">
-                    完整注音 <span className="text-cinnabar-600">*</span>
+                    注音 <span className="text-cinnabar-600">*</span>
                   </label>
                   <button
                     type="button"
                     onClick={() => setShowBopomofoPad((v) => !v)}
                     className="text-xs text-cinnabar-600 font-medium hover:underline"
                   >
-                    {showBopomofoPad ? '隱藏注音小鍵盤' : '開啟注音小鍵盤'}
+                    {showBopomofoPad ? '隱藏小鍵盤' : '注音小鍵盤'}
                   </button>
                 </div>
                 <div className="relative flex items-center">
@@ -375,26 +288,43 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
                     maxLength={10}
                     value={zhuyinInput}
                     onChange={(e) => setZhuyinInput(e.target.value)}
-                    placeholder="例如：ㄩㄥˇ 或 ㄓㄨㄤ"
-                    className="w-full min-h-[46px] pl-3.5 pr-20 rounded-xl bg-white border border-paper-300 font-sans text-base text-ink-900 focus:outline-none focus:border-ink-900"
+                    placeholder="自動帶出或手動輸入"
+                    className="w-full min-h-[44px] pl-3.5 pr-18 rounded-xl bg-white border border-paper-300 font-sans text-base text-ink-900 focus:outline-none focus:border-ink-900"
                   />
                   {detectedInitial && (
-                    <span
-                      title="上傳前自動提取的 bopomofo_initial"
-                      className="absolute right-2.5 px-2 py-1 rounded-md bg-paper-100 border border-paper-200 text-xs font-serif font-bold text-cinnabar-600"
-                    >
-                      首字：{detectedInitial}
+                    <span className="absolute right-2.5 px-2 py-0.5 rounded-md bg-paper-100 border border-paper-200 text-xs font-serif font-bold text-cinnabar-600">
+                      首音：{detectedInitial}
                     </span>
                   )}
                 </div>
+
+                {/* 若該國字為破音字，列出所有候選注音供一鍵點選 */}
+                {zhuyinCandidates.length > 1 && (
+                  <div className="mt-1.5 flex items-center flex-wrap gap-1">
+                    <span className="text-[11px] text-ink-600 font-serif">破音字選擇：</span>
+                    {zhuyinCandidates.map((cand) => (
+                      <button
+                        key={cand}
+                        type="button"
+                        onClick={() => setZhuyinInput(cand)}
+                        className={`px-2 py-0.5 rounded-md text-xs font-medium border transition-colors ${
+                          zhuyinInput === cand
+                            ? 'bg-cinnabar-600 text-white border-cinnabar-600'
+                            : 'bg-white text-ink-800 border-paper-300 hover:bg-paper-100'
+                        }`}
+                      >
+                        {cand}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* 內建注音符號輔助小鍵盤（方便電腦或無注音輸入法環境直接點選） */}
             {showBopomofoPad && (
               <div className="p-3 rounded-2xl bg-paper-100 border border-paper-200 space-y-2">
                 <div className="flex items-center justify-between text-xs text-ink-600">
-                  <span>點擊注音符號直接輸入：</span>
+                  <span>點擊注音符號輸入：</span>
                   <button
                     type="button"
                     onClick={() => setZhuyinInput((prev) => prev.slice(0, -1))}
@@ -428,10 +358,10 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
               </div>
             )}
 
-            {/* 出處與書體（選填） */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* 出處與書體（選填，書體預設為「無」） */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div>
-                <label className="block text-xs font-serif font-bold text-ink-800 mb-1.5">
+                <label className="block text-xs font-serif font-bold text-ink-800 mb-1">
                   碑帖或作品名稱（選填）
                 </label>
                 <input
@@ -439,23 +369,23 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
                   maxLength={50}
                   value={sourceName}
                   onChange={(e) => setSourceName(e.target.value)}
-                  placeholder="例如：蘭亭序、九成宮醴泉銘"
-                  className="w-full min-h-[46px] px-3.5 rounded-xl bg-white border border-paper-300 font-serif text-sm text-ink-900 focus:outline-none focus:border-ink-900"
+                  placeholder="例如：蘭亭序"
+                  className="w-full min-h-[44px] px-3.5 rounded-xl bg-white border border-paper-300 font-serif text-sm text-ink-900 focus:outline-none focus:border-ink-900"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-serif font-bold text-ink-800 mb-1.5">
+                <label className="block text-xs font-serif font-bold text-ink-800 mb-1">
                   書體分類（選填）
                 </label>
                 <select
                   value={scriptType}
                   onChange={(e) => setScriptType(e.target.value)}
-                  className="w-full min-h-[46px] px-3.5 rounded-xl bg-white border border-paper-300 font-serif text-sm text-ink-900 focus:outline-none focus:border-ink-900"
+                  className="w-full min-h-[44px] px-3.5 rounded-xl bg-white border border-paper-300 font-serif text-sm text-ink-900 focus:outline-none focus:border-ink-900"
                 >
                   {SCRIPT_TYPES.map((st) => (
-                    <option key={st} value={st}>
-                      {st}
+                    <option key={st || 'none'} value={st}>
+                      {st === '' ? '無（不標註）' : st}
                     </option>
                   ))}
                 </select>
@@ -464,30 +394,30 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
           </form>
         </div>
 
-        {/* 底部儲存操作列 */}
-        <div className="px-5 py-4 bg-paper-100 border-t border-paper-200 flex items-center justify-end gap-3">
+        {/* 底部儲存操作列：點擊直接一併裁切、壓縮並上傳照片 */}
+        <div className="px-5 py-3.5 bg-paper-100 border-t border-paper-200 flex items-center justify-end gap-3">
           <button
             type="button"
             onClick={handleClose}
-            className="min-h-[46px] px-5 rounded-xl border border-paper-300 text-ink-800 font-serif text-sm font-medium hover:bg-paper-200 transition-colors"
+            className="min-h-[44px] px-4 rounded-xl border border-paper-300 text-ink-800 font-serif text-sm font-medium hover:bg-paper-200 transition-colors"
           >
             取消
           </button>
           <button
             type="submit"
             form="calligraphy-upload-form"
-            disabled={isSubmitting || !croppedBlob}
-            className="min-h-[46px] px-6 rounded-xl bg-ink-900 text-paper-50 font-serif text-sm font-bold flex items-center gap-2 hover:bg-ink-800 transition-colors disabled:opacity-40"
+            disabled={isSubmitting || !rawImageSrc}
+            className="min-h-[44px] px-6 rounded-xl bg-ink-900 text-paper-50 font-serif text-sm font-bold flex items-center gap-2 hover:bg-ink-800 transition-colors disabled:opacity-40"
           >
             {isSubmitting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                儲存上傳中...
+                裁切壓縮與上傳中...
               </>
             ) : (
               <>
                 <Check className="w-4 h-4" />
-                儲存至書法字典
+                上傳並儲存字帖
               </>
             )}
           </button>

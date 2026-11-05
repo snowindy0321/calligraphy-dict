@@ -16,6 +16,7 @@ export const BOPOMOFO_SYMBOLS = [
 ] as const;
 
 export const SCRIPT_TYPES = [
+  '',
   '楷書',
   '行書',
   '草書',

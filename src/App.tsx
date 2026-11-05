@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Search,
   Plus,
@@ -10,7 +10,8 @@ import {
 } from 'lucide-react';
 import { CalligraphyEntry } from './types';
 import { fetchCalligraphyEntries } from './lib/calligraphyService';
-import { getSupabaseConfig } from './lib/supabase';
+import { supabase, getSupabaseConfig } from './lib/supabase';
+import { BOPOMOFO_SYMBOLS } from './constants/bopomofo';
 import { BopomofoNavBar } from './components/BopomofoNavBar';
 import { CalligraphyCard } from './components/CalligraphyCard';
 import { UploadCropModal } from './components/UploadCropModal';
@@ -25,12 +26,34 @@ export const App: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // 登入狀態與提示
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [loginPromptMessage, setLoginPromptMessage] = useState<string | null>(null);
+
   // 彈窗狀態
   const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
   const [activeEntry, setActiveEntry] = useState<CalligraphyEntry | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
+  // 側邊通訊錄快速索引列 (Alphabet Index Bar) 當前高亮注音
+  const [activeScrollInitial, setActiveScrollInitial] = useState<string>('');
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+
   const { isConfigured } = getSupabaseConfig();
+
+  // 監聽登入狀態
+  useEffect(() => {
+    if (!isConfigured) return;
+    supabase.auth.getSession().then(({ data }) => {
+      setUserEmail(data.session?.user?.email ?? null);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserEmail(session?.user?.email ?? null);
+    });
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, [isConfigured]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -62,6 +85,100 @@ export const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [loadEntries]);
 
+  // 5A. 將字帖資料依 bopomofo_initial 分組，並嚴格依照台灣標準 37 個注音符號順序排列（只保留有資料的分組）
+  const groupedSections = useMemo(() => {
+    const map = new Map<string, CalligraphyEntry[]>();
+    for (const item of entries) {
+      const key = item.bopomofo_initial || '其他';
+      const list = map.get(key);
+      if (list) {
+        list.push(item);
+      } else {
+        map.set(key, [item]);
+      }
+    }
+
+    const ordered: { initial: string; items: CalligraphyEntry[] }[] = [];
+    for (const sym of BOPOMOFO_SYMBOLS) {
+      const list = map.get(sym);
+      if (list && list.length > 0) {
+        ordered.push({ initial: sym, items: list });
+        map.delete(sym);
+      }
+    }
+    // 若有非標準首字亦保留於末尾
+    for (const [key, list] of map.entries()) {
+      if (list.length > 0) {
+        ordered.push({ initial: key, items: list });
+      }
+    }
+    return ordered;
+  }, [entries]);
+
+  const availableInitialsSet = useMemo(
+    () => new Set(groupedSections.map((g) => g.initial)),
+    [groupedSections]
+  );
+
+  // 5B. 使用 IntersectionObserver 監聽視窗捲動，即時更新側邊注音索引列的 Active 狀態
+  useEffect(() => {
+    if (groupedSections.length === 0) {
+      setActiveScrollInitial('');
+      return;
+    }
+
+    setActiveScrollInitial((prev) =>
+      prev && groupedSections.some((g) => g.initial === prev)
+        ? prev
+        : groupedSections[0].initial
+    );
+
+    const observer = new IntersectionObserver(
+      (observedEntries) => {
+        // 找出目前進入畫面頂部觀察區的分組
+        const visible = observedEntries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+
+        if (visible.length > 0) {
+          const sym = visible[0].target.getAttribute('data-initial');
+          if (sym) setActiveScrollInitial(sym);
+        }
+      },
+      {
+        // 當分組標題進入視窗上半部時觸發高亮
+        rootMargin: '-110px 0px -65% 0px',
+        threshold: 0,
+      }
+    );
+
+    for (const group of groupedSections) {
+      const el = sectionRefs.current[group.initial];
+      if (el) observer.observe(el);
+    }
+
+    return () => observer.disconnect();
+  }, [groupedSections]);
+
+  // 點擊側邊快速索引列平滑捲動至對應注音區塊錨點
+  const handleScrollToSection = (symbol: string) => {
+    const targetEl = sectionRefs.current[symbol];
+    if (targetEl) {
+      setActiveScrollInitial(symbol);
+      targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  // 6. 點擊新增字帖時：若尚未登入帳號，先彈出登入視窗要求登入
+  const handleTriggerAdd = () => {
+    if (isConfigured && !userEmail) {
+      setLoginPromptMessage('請先登入帳號，即可拍照新增書法字帖');
+      setIsSettingsOpen(true);
+      return;
+    }
+    setIsUploadOpen(true);
+  };
+
   const handleCreated = (newEntry: CalligraphyEntry) => {
     showToast(`已成功收錄「${newEntry.char}（${newEntry.zhuyin}）」字帖！`);
     loadEntries();
@@ -74,174 +191,170 @@ export const App: React.FC = () => {
   };
 
   const handleDeleted = (_deletedId: string) => {
-    showToast('已刪除該筆字帖紀錄');
+    showToast('已刪除該筆字帖紀錄與雲端圖檔');
     loadEntries();
   };
 
+  // 取得顯示用帳號名稱（取 @ 前綴或完整顯示）
+  const displayUsername = userEmail ? userEmail.split('@')[0] : null;
+
   return (
     <div className="min-h-screen flex flex-col bg-paper-50 text-ink-900">
-      {/* 頂部東方書法文風品牌標題列 */}
-      <header className="bg-paper-100/90 border-b border-paper-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            {/* 硃砂印章標誌 */}
-            <div className="w-10 h-10 rounded-xl bg-cinnabar-600 text-paper-50 font-serif font-bold text-xl flex items-center justify-center shadow-xs select-none">
+      {/* 1A. 頂部 Header 簡化（h-14 px-4 單行不換行，左側 Logo + 標題，右側使用者帳號按鈕） */}
+      <header className="bg-paper-100/95 border-b border-paper-200">
+        <div className="max-w-6xl mx-auto flex justify-between items-center h-14 px-4">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-cinnabar-600 text-paper-50 font-serif font-bold text-base flex items-center justify-center shadow-xs shrink-0 select-none">
               帖
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="font-serif text-lg sm:text-xl font-bold tracking-wide text-ink-900">
-                  個人書法帖寫字字典
-                </h1>
-                {!isConfigured && (
-                  <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-md bg-amber-100/80 text-amber-900 border border-amber-300">
-                    本機展示模式
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-ink-600 font-serif">
-                臨帖拍照裁切・三十七注音首字索引・碑帖對照
-              </p>
-            </div>
+            <h1 className="font-serif text-lg font-bold truncate text-ink-900">
+              書法字帖字典
+            </h1>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsSettingsOpen(true)}
-              className="min-w-[44px] min-h-[44px] px-3.5 rounded-xl bg-paper-50 border border-paper-200 text-ink-800 hover:bg-paper-200 transition-colors flex items-center justify-center gap-1.5 text-xs font-serif"
-              title="會員登入"
-            >
-              <User className="w-4 h-4 text-ink-600" />
-              <span className="hidden sm:inline">登入</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsUploadOpen(true)}
-              className="min-h-[44px] px-4 rounded-xl bg-ink-900 text-paper-50 font-serif font-bold text-sm flex items-center justify-center gap-1.5 hover:bg-ink-800 active:scale-95 transition-all shadow-xs"
-            >
-              <Plus className="w-4 h-4" />
-              <span>新增字帖</span>
-            </button>
-          </div>
+          {/* 9. 右上方登入按鈕，登入後顯示目前帳號名稱 */}
+          <button
+            type="button"
+            onClick={() => {
+              setLoginPromptMessage(null);
+              setIsSettingsOpen(true);
+            }}
+            className="shrink-0 min-h-[38px] max-w-[160px] px-3 rounded-xl bg-paper-50 border border-paper-200 text-ink-800 hover:bg-paper-200 transition-colors flex items-center justify-center gap-1.5 text-xs font-serif"
+            title={userEmail ? `目前登入：${userEmail}` : '會員登入'}
+          >
+            <User className={`w-4 h-4 shrink-0 ${userEmail ? 'text-cinnabar-600' : 'text-ink-600'}`} />
+            <span className="truncate font-medium">
+              {displayUsername || '登入'}
+            </span>
+          </button>
         </div>
       </header>
 
-      {/* 固定頂端橫向 37 個注音符號快速索引導覽列 */}
+      {/* 頂端橫向注音導覽列 + 一鍵展開總覽面板 */}
       <BopomofoNavBar
         selectedInitial={selectedInitial}
         onSelectInitial={(initial) => setSelectedInitial(initial)}
+        availableInitials={availableInitialsSet}
       />
 
-      {/* 主內容區：搜尋列與字帖卡片網格 */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-5 space-y-5">
-        {/* 多功能即時搜尋列 */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-ink-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜尋中文字（如：永）、注音片段（如：ㄩㄥ）或碑帖出處（如：蘭亭序）..."
-              className="w-full min-h-[46px] pl-11 pr-10 rounded-2xl bg-white border border-paper-200 text-sm text-ink-900 placeholder:text-ink-400 shadow-scroll focus:outline-none focus:border-ink-800 transition-colors"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="min-w-[40px] min-h-[40px] absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center text-ink-400 hover:text-ink-800"
-                aria-label="清除搜尋關鍵字"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {/* 當前篩選狀態指示 */}
-          <div className="flex items-center justify-between sm:justify-end gap-2 text-xs font-serif text-ink-600 px-1">
-            <span>
-              索引分類：
-              <strong className="text-cinnabar-600 font-bold ml-1">
-                {selectedInitial === 'ALL' ? '全部注音' : `首音「${selectedInitial}」`}
-              </strong>
-            </span>
-            <span className="text-paper-300">|</span>
-            <span>共 {entries.length} 帖</span>
-          </div>
+      {/* 主內容區（預留右側給側邊注音索引列） */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 pr-10 sm:pr-14 py-4 space-y-4">
+        {/* 1B. 搜尋列精簡（移除統計列，簡化 Placeholder） */}
+        <div className="relative">
+          <Search className="w-4 h-4 text-ink-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜尋文字或注音..."
+            className="w-full h-11 pl-10 pr-9 rounded-2xl bg-white border border-paper-200 text-sm text-ink-900 placeholder:text-ink-400 shadow-scroll focus:outline-none focus:border-ink-800 transition-colors"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="w-9 h-9 absolute right-1 top-1/2 -translate-y-1/2 flex items-center justify-center text-ink-400 hover:text-ink-800"
+              aria-label="清除搜尋關鍵字"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* 錯誤提示 */}
         {errorMessage && (
-          <div className="p-4 rounded-2xl bg-cinnabar-50 border border-cinnabar-600/30 text-cinnabar-700 text-sm">
+          <div className="p-3.5 rounded-2xl bg-cinnabar-50 border border-cinnabar-600/30 text-cinnabar-700 text-xs sm:text-sm">
             {errorMessage}
           </div>
         )}
 
-        {/* 字帖卡片網格展示（手機 2 欄，平板 3-4 欄，電腦 5-6 欄） */}
+        {/* 1C & 5A. 空白狀態緊湊化 / 通訊錄樣式注音分組垂直渲染 */}
         {isLoading ? (
-          <div className="py-20 flex flex-col items-center justify-center gap-3 text-ink-600">
-            <Loader2 className="w-7 h-7 animate-spin text-cinnabar-600" />
-            <p className="font-serif text-sm">正在翻閱書法字帖索引...</p>
+          <div className="py-14 flex flex-col items-center justify-center gap-2.5 text-ink-600">
+            <Loader2 className="w-6 h-6 animate-spin text-cinnabar-600" />
+            <p className="font-serif text-xs">載入字帖中...</p>
           </div>
-        ) : entries.length === 0 ? (
-          <div className="py-16 px-4 text-center bg-white/70 rounded-3xl border border-paper-200 space-y-4">
-            <div className="w-14 h-14 rounded-2xl bg-paper-100 text-ink-600 mx-auto flex items-center justify-center">
-              <BookOpen className="w-6 h-6" />
+        ) : groupedSections.length === 0 ? (
+          <div className="py-10 px-4 text-center bg-white/70 rounded-2xl border border-paper-200 flex flex-col items-center justify-center gap-2">
+            <div className="w-10 h-10 rounded-xl bg-paper-100 text-ink-600 flex items-center justify-center">
+              <BookOpen className="w-5 h-5" />
             </div>
-            <div className="space-y-1">
-              <h2 className="font-serif text-base font-bold text-ink-900">
-                尚無符合條件的書法字帖
-              </h2>
-              <p className="text-xs text-ink-600 max-w-sm mx-auto">
-                {selectedInitial !== 'ALL' || searchQuery
-                  ? '請嘗試切換其他注音首字，或清除關鍵字重新檢索。'
-                  : '點擊右上角或下方「新增字帖」按鈕，立即拍照並框選您的第一個書法單字。'}
-              </p>
-            </div>
-            <div className="flex justify-center gap-3 pt-1">
-              {(selectedInitial !== 'ALL' || searchQuery) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedInitial('ALL');
-                    setSearchQuery('');
-                  }}
-                  className="min-h-[44px] px-4 rounded-xl border border-paper-300 text-xs font-serif font-bold text-ink-800 hover:bg-paper-100"
-                >
-                  顯示全部字帖
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setIsUploadOpen(true)}
-                className="min-h-[44px] px-5 rounded-xl bg-cinnabar-600 text-white text-xs font-serif font-bold flex items-center gap-1.5 hover:bg-cinnabar-700"
-              >
-                <Plus className="w-4 h-4" />
-                立即拍照新增字帖
-              </button>
-            </div>
+            <p className="font-serif text-sm font-medium text-ink-700">
+              尚無字帖，點擊下方 ＋ 新增
+            </p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5 sm:gap-4">
-            {entries.map((entry) => (
-              <CalligraphyCard
-                key={entry.id}
-                entry={entry}
-                onSelect={(item) => setActiveEntry(item)}
-              />
+          <div className="space-y-6 pb-20">
+            {groupedSections.map((group) => (
+              <section
+                key={group.initial}
+                id={`section-${group.initial}`}
+                data-initial={group.initial}
+                ref={(el) => {
+                  sectionRefs.current[group.initial] = el;
+                }}
+                className="scroll-mt-28 space-y-2.5"
+              >
+                {/* 每個注音區塊頂部的 Sticky 標題 */}
+                <div className="sticky top-[57px] z-10 py-1.5 px-3 bg-paper-100/95 backdrop-blur-xs rounded-xl border border-paper-200 flex items-center justify-between">
+                  <h2 className="font-serif text-base font-bold text-cinnabar-600 flex items-center gap-2">
+                    <span>{group.initial}</span>
+                  </h2>
+                  <span className="text-[11px] font-serif text-ink-600">
+                    {group.items.length} 帖
+                  </span>
+                </div>
+
+                {/* 該注音的字帖網格 */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+                  {group.items.map((entry) => (
+                    <CalligraphyCard
+                      key={entry.id}
+                      entry={entry}
+                      onSelect={(item) => setActiveEntry(item)}
+                    />
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         )}
       </main>
 
-      {/* 手機端右下角懸浮拍照新增按鈕 (FAB) */}
+      {/* 5B. 側邊快速索引列（Alphabet Index Bar，手機端浮動於右側、電腦端固定於側邊） */}
+      {groupedSections.length > 0 && (
+        <nav
+          aria-label="側邊注音分組快速索引"
+          className="fixed right-1.5 sm:right-3 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center py-1.5 px-1 rounded-full bg-paper-100/90 backdrop-blur-xs border border-paper-200 shadow-scroll max-h-[70vh] overflow-y-auto no-scrollbar"
+        >
+          {groupedSections.map((group) => {
+            const isCurrent = activeScrollInitial === group.initial;
+            return (
+              <button
+                key={group.initial}
+                type="button"
+                onClick={() => handleScrollToSection(group.initial)}
+                className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full font-serif text-xs font-bold flex items-center justify-center transition-all shrink-0 ${
+                  isCurrent
+                    ? 'bg-cinnabar-600 text-white scale-110 shadow-xs'
+                    : 'text-ink-700 hover:bg-paper-200'
+                }`}
+                title={`跳至「${group.initial}」分組`}
+              >
+                {group.initial}
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
+      {/* 右下角紅色懸浮新增按鈕 (FAB) */}
       <button
         type="button"
-        onClick={() => setIsUploadOpen(true)}
-        className="sm:hidden fixed right-5 bottom-6 z-30 w-14 h-14 rounded-2xl bg-cinnabar-600 text-white shadow-lg flex items-center justify-center active:scale-95 transition-transform"
-        aria-label="拍照新增字帖"
+        onClick={handleTriggerAdd}
+        className="fixed right-4 bottom-5 z-30 w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-cinnabar-600 hover:bg-cinnabar-700 text-white shadow-lg flex items-center justify-center active:scale-95 transition-all"
+        aria-label="新增書法字帖"
+        title="新增書法字帖"
       >
         <Plus className="w-6 h-6" />
       </button>
@@ -261,7 +374,7 @@ export const App: React.FC = () => {
         onSuccess={handleCreated}
       />
 
-      {/* 彈窗：字帖燈箱大圖檢視（含九宮格輔助線、編輯與刪除） */}
+      {/* 彈窗：字帖燈箱大圖檢視 */}
       <EntryDetailModal
         entry={activeEntry}
         onClose={() => setActiveEntry(null)}
@@ -269,10 +382,20 @@ export const App: React.FC = () => {
         onDeleted={handleDeleted}
       />
 
-      {/* 彈窗：Supabase 連線與 RLS 管理員登入設定 */}
+      {/* 彈窗：會員登入（若因點擊新增觸發登入，登入成功後自動開啟新增視窗） */}
       <AuthSettingsModal
         isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
+        onClose={() => {
+          setIsSettingsOpen(false);
+          setLoginPromptMessage(null);
+        }}
+        promptMessage={loginPromptMessage}
+        onLoginSuccess={() => {
+          if (loginPromptMessage) {
+            setLoginPromptMessage(null);
+            setIsUploadOpen(true);
+          }
+        }}
       />
     </div>
   );

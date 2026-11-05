@@ -5,11 +5,15 @@ import { supabase, getSupabaseConfig } from '../lib/supabase';
 interface AuthSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  promptMessage?: string | null;
+  onLoginSuccess?: (email: string) => void;
 }
 
 export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
   isOpen,
   onClose,
+  promptMessage,
+  onLoginSuccess,
 }) => {
   const { isConfigured } = getSupabaseConfig();
 
@@ -17,7 +21,6 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
   const [password, setPassword] = useState('');
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -35,19 +38,32 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSignIn = async (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setAuthError(null);
-    setAuthMessage(null);
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
       if (error) throw error;
-      setPassword('');
-      setAuthMessage('登入成功！您現在可以新增、編輯或刪除書法字帖。');
+
+      // 輔助觸發瀏覽器 Credential Management API 記憶帳號密碼
+      if ('credentials' in navigator && (window as unknown as { PasswordCredential?: new (form: HTMLFormElement) => Credential }).PasswordCredential) {
+        try {
+          const PasswordCredentialCtor = (window as unknown as { PasswordCredential: new (form: HTMLFormElement) => Credential }).PasswordCredential;
+          const cred = new PasswordCredentialCtor(e.currentTarget);
+          await navigator.credentials.store(cred);
+        } catch {
+          // 忽略部分瀏覽器不支援之情況，標準 form name/autocomplete 已支援自動記憶
+        }
+      }
+
+      if (data.user?.email && onLoginSuccess) {
+        onLoginSuccess(data.user.email);
+      }
+      onClose();
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : '帳號或密碼錯誤，請重新輸入');
     } finally {
@@ -58,7 +74,7 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setUserEmail(null);
-    setAuthMessage(null);
+    onClose();
   };
 
   return (
@@ -70,8 +86,7 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
         className="bg-paper-50 w-full max-w-sm rounded-3xl border border-paper-200 shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 頂部標題 */}
-        <div className="px-5 py-4 bg-paper-100 border-b border-paper-200 flex items-center justify-between">
+        <div className="px-5 py-3.5 bg-paper-100 border-b border-paper-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Lock className="w-4 h-4 text-cinnabar-600" />
             <h2 className="font-serif text-base font-bold text-ink-900">
@@ -81,15 +96,14 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center text-ink-600 hover:bg-paper-200 transition-colors"
+            className="min-w-[40px] min-h-[40px] rounded-xl flex items-center justify-center text-ink-600 hover:bg-paper-200 transition-colors"
             aria-label="關閉視窗"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* 登入表單或已登入資訊 */}
-        <div className="p-6">
+        <div className="p-5">
           {userEmail ? (
             <div className="space-y-4 text-center">
               <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600 mx-auto flex items-center justify-center">
@@ -114,56 +128,77 @@ export const AuthSettingsModal: React.FC<AuthSettingsModalProps> = ({
               </button>
             </div>
           ) : (
-            <form onSubmit={handleSignIn} className="space-y-4">
-              <p className="text-xs text-ink-600 font-serif leading-relaxed">
-                請輸入您的管理員信箱與密碼，登入後即可拍照上傳、編輯或刪除個人書法字帖。
-              </p>
+            /* 採用標準密碼儲存格屬性 id / name / autoComplete，讓 Chrome / Safari / iOS 密碼鑰匙圈自動記住網站帳密 */
+            <form
+              id="login-form"
+              name="login"
+              method="post"
+              action="/login"
+              autoComplete="on"
+              onSubmit={handleSignIn}
+              className="space-y-4"
+            >
+              {promptMessage ? (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-serif">
+                  {promptMessage}
+                </div>
+              ) : (
+                <p className="text-xs text-ink-600 font-serif leading-relaxed">
+                  請登入管理員帳號以新增、編輯或刪除書法字帖（瀏覽器可自動記憶此組帳密）。
+                </p>
+              )}
 
               {authError && (
                 <p className="text-xs text-cinnabar-600 bg-cinnabar-50 p-3 rounded-xl border border-cinnabar-600/20">
                   {authError}
                 </p>
               )}
-              {authMessage && (
-                <p className="text-xs text-emerald-700 bg-emerald-50 p-3 rounded-xl border border-emerald-200">
-                  {authMessage}
-                </p>
-              )}
 
               <div>
-                <label className="block text-xs font-serif font-bold text-ink-800 mb-1.5">
-                  電子信箱
+                <label
+                  htmlFor="login-username"
+                  className="block text-xs font-serif font-bold text-ink-800 mb-1"
+                >
+                  帳號（電子信箱）
                 </label>
                 <input
+                  id="login-username"
+                  name="username"
                   type="email"
                   required
-                  autoComplete="email"
+                  autoComplete="username"
+                  inputMode="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@example.com"
-                  className="w-full min-h-[46px] px-3.5 rounded-xl bg-white border border-paper-300 text-sm text-ink-900 focus:outline-none focus:border-ink-900"
+                  className="w-full min-h-[44px] px-3.5 rounded-xl bg-white border border-paper-300 text-sm text-ink-900 focus:outline-none focus:border-ink-900"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-serif font-bold text-ink-800 mb-1.5">
+                <label
+                  htmlFor="login-password"
+                  className="block text-xs font-serif font-bold text-ink-800 mb-1"
+                >
                   密碼
                 </label>
                 <input
+                  id="login-password"
+                  name="password"
                   type="password"
                   required
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="請輸入密碼"
-                  className="w-full min-h-[46px] px-3.5 rounded-xl bg-white border border-paper-300 text-sm text-ink-900 focus:outline-none focus:border-ink-900"
+                  className="w-full min-h-[44px] px-3.5 rounded-xl bg-white border border-paper-300 text-sm text-ink-900 focus:outline-none focus:border-ink-900"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full min-h-[46px] rounded-xl bg-ink-900 text-paper-50 font-serif text-sm font-bold flex items-center justify-center gap-2 hover:bg-ink-800 transition-colors disabled:opacity-50"
+                className="w-full min-h-[44px] rounded-xl bg-ink-900 text-paper-50 font-serif text-sm font-bold flex items-center justify-center gap-2 hover:bg-ink-800 transition-colors disabled:opacity-50"
               >
                 <LogIn className="w-4 h-4" />
                 {loading ? '登入驗證中...' : '登入'}
