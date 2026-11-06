@@ -16,15 +16,17 @@ declare global {
   }
 }
 
-const DISMISS_STORAGE_KEY = 'calligraphy_pwa_prompt_dismissed_v3';
+const DISMISS_STORAGE_KEY = 'calligraphy_pwa_prompt_dismissed_v4';
 
 export const PwaInstallPrompt: React.FC = () => {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(
     () => window.__deferredPwaPrompt || null
   );
-  const [showPrompt, setShowPrompt] = useState(false);
-  const [deviceType, setDeviceType] = useState<'android' | 'ios' | 'other'>('other');
-  const [showManualGuide, setShowManualGuide] = useState(false);
+  const [isIosDevice, setIsIosDevice] = useState(false);
+  const [isDismissed, setIsDismissed] = useState(
+    () => sessionStorage.getItem(DISMISS_STORAGE_KEY) === '1'
+  );
+  const [showIosGuideModal, setShowIosGuideModal] = useState(false);
 
   useEffect(() => {
     // 1. 若已經在獨立 App 模式 (standalone) 運作，不再顯示安裝提示
@@ -38,21 +40,16 @@ export const PwaInstallPrompt: React.FC = () => {
     const isIos = /iphone|ipad|ipod/.test(ua);
     const isAndroid = /android/.test(ua);
 
-    // 2. 僅在手機 / 行動裝置 (Android 或 iOS) 顯示安裝提示
+    // 2. 僅在手機 / 行動裝置 (Android 或 iOS) 運作
     if (!isIos && !isAndroid) return;
 
-    setDeviceType(isIos ? 'ios' : 'android');
-
-    const isDismissed = sessionStorage.getItem(DISMISS_STORAGE_KEY) === '1';
-    if (!isDismissed) {
-      setShowPrompt(true);
+    if (isIos) {
+      setIsIosDevice(true);
     }
 
     const syncPrompt = () => {
       if (window.__deferredPwaPrompt) {
         setDeferredPrompt(window.__deferredPwaPrompt);
-        setShowManualGuide(false);
-        if (!isDismissed) setShowPrompt(true);
       }
     };
 
@@ -63,16 +60,12 @@ export const PwaInstallPrompt: React.FC = () => {
       const promptEvent = e as BeforeInstallPromptEvent;
       window.__deferredPwaPrompt = promptEvent;
       setDeferredPrompt(promptEvent);
-      setShowManualGuide(false);
-      if (!isDismissed) {
-        setShowPrompt(true);
-      }
     };
 
     const handleAppInstalled = () => {
       window.__deferredPwaPrompt = null;
       setDeferredPrompt(null);
-      setShowPrompt(false);
+      setIsDismissed(true);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -91,23 +84,26 @@ export const PwaInstallPrompt: React.FC = () => {
     if (promptEvent) {
       await promptEvent.prompt();
       const { outcome } = await promptEvent.userChoice;
-      if (outcome === 'accepted') {
-        setShowPrompt(false);
-      }
       window.__deferredPwaPrompt = null;
       setDeferredPrompt(null);
-    } else {
-      // 若手機已經安裝過該 PWA 或處於 App 內建瀏覽器，展開提醒說明
-      setShowManualGuide(true);
+      if (outcome === 'accepted') {
+        setIsDismissed(true);
+      }
+    } else if (isIosDevice) {
+      setShowIosGuideModal((v) => !v);
     }
   };
 
   const handleDismiss = () => {
     sessionStorage.setItem(DISMISS_STORAGE_KEY, '1');
-    setShowPrompt(false);
+    setIsDismissed(true);
   };
 
-  if (!showPrompt) return null;
+  // Android 端：只有在 Chrome 真正準備好原生安裝事件 (deferredPrompt !== null) 時才彈出橫幅，確保點擊「安裝」100% 喚起 Chrome 原生安裝視窗！
+  // iOS 端：因蘋果系統無 beforeinstallprompt，顯示 Safari 加入主畫面引導
+  const shouldShowBanner = !isDismissed && (Boolean(deferredPrompt) || isIosDevice);
+
+  if (!shouldShowBanner) return null;
 
   return (
     <div className="fixed bottom-5 left-4 right-22 z-40 bg-ink-900 text-paper-50 rounded-2xl p-3 shadow-2xl border border-ink-800 flex items-center justify-between gap-2.5">
@@ -119,24 +115,20 @@ export const PwaInstallPrompt: React.FC = () => {
           <p className="font-serif font-bold text-xs truncate">
             安裝「書法字帖字典」App
           </p>
-          {deviceType === 'ios' ? (
+          {isIosDevice && !deferredPrompt ? (
             <p className="text-[11px] text-paper-200 flex items-center gap-1 mt-0.5 leading-tight">
-              點擊下方 <Share className="w-3 h-3 inline shrink-0 text-cinnabar-600" /> 分享 ➔「加入主畫面」
-            </p>
-          ) : showManualGuide ? (
-            <p className="text-[11px] text-amber-200 flex items-center gap-0.5 mt-0.5 leading-tight">
-              請點右上角 <MoreVertical className="w-3 h-3 inline shrink-0" /> 選單 ➔「安裝應用程式」
+              點下方 <Share className="w-3 h-3 inline shrink-0 text-cinnabar-600" /> 分享 ➔「加入主畫面」
             </p>
           ) : (
             <p className="text-[11px] text-paper-200 truncate mt-0.5">
-              建立桌面捷徑，以獨立全螢幕模式開啟
+              建立桌面捷徑，以獨立全螢幕開啟
             </p>
           )}
         </div>
       </div>
 
       <div className="flex items-center gap-1.5 shrink-0">
-        {deviceType === 'android' && (
+        {deferredPrompt && (
           <button
             type="button"
             onClick={handleInstallClick}
