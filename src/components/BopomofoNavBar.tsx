@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { LayoutGrid, ChevronUp } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { LayoutGrid, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { BOPOMOFO_SYMBOLS } from '../constants/bopomofo';
 
 interface BopomofoNavBarProps {
@@ -14,18 +14,49 @@ export const BopomofoNavBar: React.FC<BopomofoNavBarProps> = ({
   availableInitials,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const handleSelect = (symbol: string) => {
     onSelectInitial(symbol);
     setIsExpanded(false);
   };
 
+  // 支援電腦端滑鼠滾輪垂直滾動時，自動轉為水平滑動注音列
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        el.scrollBy({ left: e.deltaY * 1.5, behavior: 'smooth' });
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  const scrollByAmount = (amount: number) => {
+    scrollRef.current?.scrollBy({ left: amount, behavior: 'smooth' });
+  };
+
   return (
     <div className="sticky top-0 z-20 bg-paper-50/95 backdrop-blur-md border-b border-paper-200 shadow-xs">
       <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2">
         <div className="flex items-center gap-1.5">
-          {/* 橫向滑動列 */}
+          {/* 電腦端專用：向左捲動按鈕 */}
+          <button
+            type="button"
+            onClick={() => scrollByAmount(-280)}
+            className="hidden sm:flex shrink-0 w-9 h-10 rounded-xl bg-white border border-paper-300 text-ink-700 hover:bg-paper-100 items-center justify-center transition-colors"
+            title="向左捲動注音列"
+            aria-label="向左捲動注音列"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+
+          {/* 橫向滑動列（手機支援觸控滑動，電腦支援滑鼠滾輪與左右按鈕） */}
           <div
+            ref={scrollRef}
             className="flex-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5"
             role="tablist"
             aria-label="注音符號快速索引"
@@ -68,7 +99,18 @@ export const BopomofoNavBar: React.FC<BopomofoNavBarProps> = ({
             })}
           </div>
 
-          {/* 一鍵展開所有注音按鈕（避免一直往右滑） */}
+          {/* 電腦端專用：向右捲動按鈕 */}
+          <button
+            type="button"
+            onClick={() => scrollByAmount(280)}
+            className="hidden sm:flex shrink-0 w-9 h-10 rounded-xl bg-white border border-paper-300 text-ink-700 hover:bg-paper-100 items-center justify-center transition-colors"
+            title="向右捲動注音列"
+            aria-label="向右捲動注音列"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+
+          {/* 一鍵展開所有注音按鈕 */}
           <button
             type="button"
             onClick={() => setIsExpanded((v) => !v)}

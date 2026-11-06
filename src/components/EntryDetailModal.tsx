@@ -24,6 +24,7 @@ export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [showNineGrid, setShowNineGrid] = useState(true);
   const [charInput, setCharInput] = useState('');
+  const [isComposing, setIsComposing] = useState(false);
   const [zhuyinInput, setZhuyinInput] = useState('');
   const [sourceName, setSourceName] = useState('');
   const [scriptType, setScriptType] = useState('');
@@ -35,6 +36,7 @@ export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
   useEffect(() => {
     if (entry) {
       setCharInput(entry.char);
+      setIsComposing(false);
       setZhuyinInput(entry.zhuyin);
       setSourceName(entry.source_name || '');
       setScriptType(entry.script_type || '');
@@ -46,12 +48,27 @@ export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
 
   if (!entry) return null;
 
-  const handleCharChange = (val: string) => {
-    setCharInput(val);
-    const candidates = getZhuyinCandidates(val);
+  const applySingleCharAndZhuyin = (rawVal: string) => {
+    const chars = Array.from(rawVal.trim());
+    const singleChar = chars.length > 0 ? chars[0] : '';
+    setCharInput(singleChar);
+    const candidates = getZhuyinCandidates(singleChar);
     if (candidates.length > 0) {
       setZhuyinInput(candidates[0]);
     }
+  };
+
+  const handleCharChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isComposing) {
+      setCharInput(e.target.value);
+      return;
+    }
+    applySingleCharAndZhuyin(e.target.value);
+  };
+
+  const handleCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
+    setIsComposing(false);
+    applySingleCharAndZhuyin(e.currentTarget.value);
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
@@ -218,14 +235,16 @@ export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-serif text-ink-600 mb-1">
-                    中文字
+                    中文字（限單字）
                   </label>
                   <input
                     type="text"
                     required
-                    maxLength={2}
+                    maxLength={1}
                     value={charInput}
-                    onChange={(e) => handleCharChange(e.target.value)}
+                    onCompositionStart={() => setIsComposing(true)}
+                    onCompositionEnd={handleCompositionEnd}
+                    onChange={handleCharChange}
                     className="w-full min-h-[42px] px-3 rounded-xl bg-white border border-paper-300 font-serif text-base"
                   />
                 </div>

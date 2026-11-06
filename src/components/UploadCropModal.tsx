@@ -41,6 +41,7 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
 
   // 表單欄位（書體預設為無 ''）
   const [charInput, setCharInput] = useState('');
+  const [isComposing, setIsComposing] = useState(false);
   const [zhuyinInput, setZhuyinInput] = useState('');
   const [zhuyinCandidates, setZhuyinCandidates] = useState<string[]>([]);
   const [sourceName, setSourceName] = useState('');
@@ -60,6 +61,7 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
     setZoom(1);
     setCroppedAreaPixels(null);
     setCharInput('');
+    setIsComposing(false);
     setZhuyinInput('');
     setZhuyinCandidates([]);
     setSourceName('');
@@ -88,16 +90,36 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
     setCroppedAreaPixels(croppedPixels);
   }, []);
 
-  // 當輸入國字時，自動帶出標準注音與破音字候選
-  const handleCharChange = (val: string) => {
-    setCharInput(val);
-    const candidates = getZhuyinCandidates(val);
+  // 嚴格限制中文字欄位只能保留 1 個字，並自動帶出標準注音與破音字候選
+  const applySingleCharAndZhuyin = (rawVal: string) => {
+    const trimmed = rawVal.trim();
+    const chars = Array.from(trimmed);
+    // 若使用者貼上或輸入超過 1 個字，只取最後輸入或第一個有效單字
+    const singleChar = chars.length > 0 ? chars[0] : '';
+    setCharInput(singleChar);
+
+    const candidates = getZhuyinCandidates(singleChar);
     setZhuyinCandidates(candidates);
     if (candidates.length > 0) {
       setZhuyinInput(candidates[0]);
-    } else if (!val.trim()) {
+    } else if (!singleChar) {
       setZhuyinInput('');
     }
+  };
+
+  const handleCharChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    if (isComposing) {
+      // 中文輸入法組字中暫存，待選字完成 (onCompositionEnd) 立即截斷為 1 個字
+      setCharInput(val);
+      return;
+    }
+    applySingleCharAndZhuyin(val);
+  };
+
+  const handleCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
+    setIsComposing(false);
+    applySingleCharAndZhuyin(e.currentTarget.value);
   };
 
   // 點擊下方儲存按鈕時，直接一併完成 1:1 裁切、WebP 壓縮與上傳
@@ -185,7 +207,7 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
             className="hidden"
           />
 
-          {/* 圖片選取與 1:1 即時框選區（無須額外按確認裁切，點下方上傳自動一併裁切壓縮） */}
+          {/* 圖片選取與 1:1 即時框選區 */}
           {!rawImageSrc ? (
             <div className="border-2 border-dashed border-paper-300 rounded-2xl bg-paper-100/50 p-6 text-center space-y-3">
               <div className="w-12 h-12 rounded-2xl bg-paper-200/80 text-ink-800 mx-auto flex items-center justify-center">
@@ -251,17 +273,19 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
           {/* 表單資訊填寫 */}
           <form id="calligraphy-upload-form" onSubmit={handleSubmit} className="space-y-3.5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              {/* 中文字（必填，輸入後自動帶出注音） */}
+              {/* 中文字（必填，嚴格限制 1 個字，輸入後自動帶出注音） */}
               <div>
                 <label className="block text-xs font-serif font-bold text-ink-800 mb-1">
-                  中文字 <span className="text-cinnabar-600">*</span>（輸入自動帶出注音）
+                  中文字 <span className="text-cinnabar-600">*</span>（限單一字元）
                 </label>
                 <input
                   type="text"
                   required
-                  maxLength={2}
+                  maxLength={1}
                   value={charInput}
-                  onChange={(e) => handleCharChange(e.target.value)}
+                  onCompositionStart={() => setIsComposing(true)}
+                  onCompositionEnd={handleCompositionEnd}
+                  onChange={handleCharChange}
                   placeholder="例如：永"
                   className="w-full min-h-[44px] px-3.5 rounded-xl bg-white border border-paper-300 font-serif text-lg text-ink-900 focus:outline-none focus:border-ink-900"
                 />
