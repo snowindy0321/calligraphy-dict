@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, X, Share, MoreVertical } from 'lucide-react';
+import { Download, X, Share } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -16,17 +16,17 @@ declare global {
   }
 }
 
-const DISMISS_STORAGE_KEY = 'calligraphy_pwa_prompt_dismissed_v4';
+const DISMISS_STORAGE_KEY = 'calligraphy_pwa_prompt_dismissed_v5';
 
 export const PwaInstallPrompt: React.FC = () => {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(
     () => window.__deferredPwaPrompt || null
   );
-  const [isIosDevice, setIsIosDevice] = useState(false);
+  const [deviceType, setDeviceType] = useState<'android' | 'ios' | 'other'>('other');
   const [isDismissed, setIsDismissed] = useState(
     () => sessionStorage.getItem(DISMISS_STORAGE_KEY) === '1'
   );
-  const [showIosGuideModal, setShowIosGuideModal] = useState(false);
+  const [showAndroidGuide, setShowAndroidGuide] = useState(false);
 
   useEffect(() => {
     // 1. 若已經在獨立 App 模式 (standalone) 運作，不再顯示安裝提示
@@ -40,16 +40,14 @@ export const PwaInstallPrompt: React.FC = () => {
     const isIos = /iphone|ipad|ipod/.test(ua);
     const isAndroid = /android/.test(ua);
 
-    // 2. 僅在手機 / 行動裝置 (Android 或 iOS) 運作
     if (!isIos && !isAndroid) return;
 
-    if (isIos) {
-      setIsIosDevice(true);
-    }
+    setDeviceType(isIos ? 'ios' : 'android');
 
     const syncPrompt = () => {
       if (window.__deferredPwaPrompt) {
         setDeferredPrompt(window.__deferredPwaPrompt);
+        setShowAndroidGuide(false);
       }
     };
 
@@ -60,6 +58,7 @@ export const PwaInstallPrompt: React.FC = () => {
       const promptEvent = e as BeforeInstallPromptEvent;
       window.__deferredPwaPrompt = promptEvent;
       setDeferredPrompt(promptEvent);
+      setShowAndroidGuide(false);
     };
 
     const handleAppInstalled = () => {
@@ -89,8 +88,8 @@ export const PwaInstallPrompt: React.FC = () => {
       if (outcome === 'accepted') {
         setIsDismissed(true);
       }
-    } else if (isIosDevice) {
-      setShowIosGuideModal((v) => !v);
+    } else {
+      setShowAndroidGuide(true);
     }
   };
 
@@ -99,11 +98,9 @@ export const PwaInstallPrompt: React.FC = () => {
     setIsDismissed(true);
   };
 
-  // Android 端：只有在 Chrome 真正準備好原生安裝事件 (deferredPrompt !== null) 時才彈出橫幅，確保點擊「安裝」100% 喚起 Chrome 原生安裝視窗！
-  // iOS 端：因蘋果系統無 beforeinstallprompt，顯示 Safari 加入主畫面引導
-  const shouldShowBanner = !isDismissed && (Boolean(deferredPrompt) || isIosDevice);
-
-  if (!shouldShowBanner) return null;
+  if (isDismissed || (deviceType !== 'android' && deviceType !== 'ios')) {
+    return null;
+  }
 
   return (
     <div className="fixed bottom-5 left-4 right-22 z-40 bg-ink-900 text-paper-50 rounded-2xl p-3 shadow-2xl border border-ink-800 flex items-center justify-between gap-2.5">
@@ -115,9 +112,13 @@ export const PwaInstallPrompt: React.FC = () => {
           <p className="font-serif font-bold text-xs truncate">
             安裝「書法字帖字典」App
           </p>
-          {isIosDevice && !deferredPrompt ? (
+          {deviceType === 'ios' ? (
             <p className="text-[11px] text-paper-200 flex items-center gap-1 mt-0.5 leading-tight">
               點下方 <Share className="w-3 h-3 inline shrink-0 text-cinnabar-600" /> 分享 ➔「加入主畫面」
+            </p>
+          ) : showAndroidGuide ? (
+            <p className="text-[11px] text-amber-200 mt-0.5 leading-tight">
+              請點瀏覽器右上角「⋮」➔「安裝並建立捷徑 / 安裝應用程式」
             </p>
           ) : (
             <p className="text-[11px] text-paper-200 truncate mt-0.5">
@@ -128,7 +129,7 @@ export const PwaInstallPrompt: React.FC = () => {
       </div>
 
       <div className="flex items-center gap-1.5 shrink-0">
-        {deferredPrompt && (
+        {deviceType === 'android' && (
           <button
             type="button"
             onClick={handleInstallClick}
