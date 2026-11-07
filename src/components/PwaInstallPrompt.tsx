@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Download, X, Share } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -13,6 +14,10 @@ interface BeforeInstallPromptEvent extends Event {
 declare global {
   interface Window {
     __deferredPwaPrompt?: BeforeInstallPromptEvent | null;
+    Capacitor?: {
+      isNativePlatform?: () => boolean;
+      getPlatform?: () => string;
+    };
   }
 }
 
@@ -29,12 +34,17 @@ export const PwaInstallPrompt: React.FC = () => {
   const [showAndroidGuide, setShowAndroidGuide] = useState(false);
 
   useEffect(() => {
-    // 1. 若已經在獨立 App 模式 (standalone) 運作，不再顯示安裝提示
+    // 1. 若在 Capacitor 原生 App 內執行，或已經在獨立 PWA 模式 (standalone) 運作，絕對不顯示安裝提示
+    const isCapacitorNative =
+      Capacitor.isNativePlatform() ||
+      window.Capacitor?.isNativePlatform?.() === true ||
+      window.navigator.userAgent.includes('CapacitorApp');
+
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
       (window.navigator as unknown as { standalone?: boolean }).standalone === true;
 
-    if (isStandalone) return;
+    if (isCapacitorNative || isStandalone) return;
 
     const ua = window.navigator.userAgent.toLowerCase();
     const isIos = /iphone|ipad|ipod/.test(ua);
@@ -98,7 +108,12 @@ export const PwaInstallPrompt: React.FC = () => {
     setIsDismissed(true);
   };
 
-  if (isDismissed || (deviceType !== 'android' && deviceType !== 'ios')) {
+  // 若在 Capacitor 原生環境則直接回傳 null
+  if (
+    Capacitor.isNativePlatform() ||
+    isDismissed ||
+    (deviceType !== 'android' && deviceType !== 'ios')
+  ) {
     return null;
   }
 
