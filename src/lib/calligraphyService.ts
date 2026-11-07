@@ -36,7 +36,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 /**
- * 查詢字帖列表（支援依注音首字 bopomofo_initial 過濾，與關鍵字搜尋 char / zhuyin / source_name）
+ * 查詢字帖列表（支援依注音首字 bopomofo_initial 過濾，與關鍵字搜尋 char / zhuyin / source_name / notes）
  */
 export async function fetchCalligraphyEntries(params: {
   initial?: string; // 'ALL' 或 37 個注音符號之一
@@ -58,7 +58,8 @@ export async function fetchCalligraphyEntries(params: {
           item.char.includes(q) ||
           item.zhuyin.includes(q) ||
           (item.source_name && item.source_name.includes(q)) ||
-          (item.script_type && item.script_type.includes(q))
+          (item.script_type && item.script_type.includes(q)) ||
+          (item.notes && item.notes.includes(q))
       );
     }
     return list.sort(
@@ -77,7 +78,7 @@ export async function fetchCalligraphyEntries(params: {
 
   if (searchQuery && searchQuery.trim()) {
     const q = searchQuery.trim();
-    // 同時檢索中文字或注音片段或碑帖出處
+    // 同時檢索中文字、注音片段或碑帖出處
     query = query.or(`char.ilike.%${q}%,zhuyin.ilike.%${q}%,source_name.ilike.%${q}%`);
   }
 
@@ -125,6 +126,7 @@ export async function createCalligraphyEntry(
   const charTrimmed = Array.from(input.char.trim())[0] || '';
   const zhuyinTrimmed = input.zhuyin.trim();
   const bopomofoInitial = extractBopomofoInitial(zhuyinTrimmed);
+  const notesTrimmed = input.notes?.trim() || null;
 
   if (!charTrimmed) {
     throw new Error('請輸入單一中文字');
@@ -144,6 +146,7 @@ export async function createCalligraphyEntry(
       bopomofo_initial: bopomofoInitial,
       source_name: input.source_name?.trim() || null,
       script_type: input.script_type?.trim() || null,
+      notes: notesTrimmed,
       image_url: dataUrl,
       created_at: new Date().toISOString(),
     };
@@ -179,22 +182,30 @@ export async function createCalligraphyEntry(
   const imageUrl = publicUrlData.publicUrl;
 
   // 3. 寫入資料庫表格 `calligraphy_entries`
+  const payload: Record<string, unknown> = {
+    char: charTrimmed,
+    zhuyin: zhuyinTrimmed,
+    bopomofo_initial: bopomofoInitial,
+    source_name: input.source_name?.trim() || null,
+    script_type: input.script_type?.trim() || null,
+    image_url: imageUrl,
+  };
+  if (notesTrimmed !== null) {
+    payload.notes = notesTrimmed;
+  }
+
   const { data, error: insertError } = await supabase
     .from('calligraphy_entries')
-    .insert([
-      {
-        char: charTrimmed,
-        zhuyin: zhuyinTrimmed,
-        bopomofo_initial: bopomofoInitial,
-        source_name: input.source_name?.trim() || null,
-        script_type: input.script_type?.trim() || null,
-        image_url: imageUrl,
-      },
-    ])
+    .insert([payload])
     .select()
     .single();
 
   if (insertError) {
+    if (insertError.message.includes('notes')) {
+      throw new Error(
+        '資料庫尚未新增 notes（說明）欄位，請至 Supabase SQL Editor 執行：ALTER TABLE public.calligraphy_entries ADD COLUMN IF NOT EXISTS notes text;'
+      );
+    }
     throw new Error(`寫入字帖資料表失敗：${insertError.message}`);
   }
 
@@ -202,7 +213,7 @@ export async function createCalligraphyEntry(
 }
 
 /**
- * 更新既有字帖的文字與出處資訊
+ * 更新既有字帖的文字、出處、書體與說明資訊
  */
 export async function updateCalligraphyEntry(
   input: UpdateCalligraphyInput
@@ -210,6 +221,7 @@ export async function updateCalligraphyEntry(
   const charTrimmed = Array.from(input.char.trim())[0] || '';
   const zhuyinTrimmed = input.zhuyin.trim();
   const bopomofoInitial = extractBopomofoInitial(zhuyinTrimmed);
+  const notesTrimmed = input.notes?.trim() || null;
 
   if (!charTrimmed || !zhuyinTrimmed || !bopomofoInitial) {
     throw new Error('中文字與注音為必填欄位');
@@ -228,6 +240,7 @@ export async function updateCalligraphyEntry(
             bopomofo_initial: bopomofoInitial,
             source_name: input.source_name?.trim() || null,
             script_type: input.script_type?.trim() || null,
+            notes: notesTrimmed,
           }
         : item
     );
@@ -237,20 +250,28 @@ export async function updateCalligraphyEntry(
     return found;
   }
 
+  const updatePayload: Record<string, unknown> = {
+    char: charTrimmed,
+    zhuyin: zhuyinTrimmed,
+    bopomofo_initial: bopomofoInitial,
+    source_name: input.source_name?.trim() || null,
+    script_type: input.script_type?.trim() || null,
+    notes: notesTrimmed,
+  };
+
   const { data, error } = await supabase
     .from('calligraphy_entries')
-    .update({
-      char: charTrimmed,
-      zhuyin: zhuyinTrimmed,
-      bopomofo_initial: bopomofoInitial,
-      source_name: input.source_name?.trim() || null,
-      script_type: input.script_type?.trim() || null,
-    })
+    .update(updatePayload)
     .eq('id', input.id)
     .select()
     .single();
 
   if (error) {
+    if (error.message.includes('notes')) {
+      throw new Error(
+        '資料庫尚未新增 notes（說明）欄位，請至 Supabase SQL Editor 執行：ALTER TABLE public.calligraphy_entries ADD COLUMN IF NOT EXISTS notes text;'
+      );
+    }
     throw new Error(`更新失敗：${error.message}`);
   }
 

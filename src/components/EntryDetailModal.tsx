@@ -28,6 +28,7 @@ export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
   const [zhuyinInput, setZhuyinInput] = useState('');
   const [sourceName, setSourceName] = useState('');
   const [scriptType, setScriptType] = useState('');
+  const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -40,6 +41,7 @@ export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
       setZhuyinInput(entry.zhuyin);
       setSourceName(entry.source_name || '');
       setScriptType(entry.script_type || '');
+      setNotes(entry.notes || '');
       setIsEditing(false);
       setConfirmDelete(false);
       setErrorMsg(null);
@@ -82,6 +84,7 @@ export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
         zhuyin: zhuyinInput,
         source_name: sourceName,
         script_type: scriptType,
+        notes: notes,
       });
       onUpdated(updated);
       setIsEditing(false);
@@ -105,6 +108,10 @@ export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
       setIsDeleting(false);
     }
   };
+
+  const hasSource = Boolean(entry.source_name?.trim());
+  const hasScript = Boolean(entry.script_type?.trim());
+  const hasNotes = Boolean(entry.notes?.trim());
 
   return (
     <div
@@ -175,27 +182,36 @@ export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
 
           {!isEditing ? (
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-baseline gap-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="flex items-baseline flex-wrap gap-2.5">
                     <h3 className="font-serif text-3xl font-bold text-ink-900">
                       {entry.char}
                     </h3>
                     <span className="text-lg font-medium text-cinnabar-600">
                       {entry.zhuyin}
                     </span>
-                    {entry.script_type && (
+                    {hasScript && (
                       <span className="text-xs font-serif px-2.5 py-0.5 rounded-md bg-paper-200 text-ink-800">
                         {entry.script_type}
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 text-sm font-serif text-ink-600">
-                    碑帖出處：{entry.source_name || '未標註'}
-                  </p>
+
+                  {hasSource && (
+                    <p className="text-sm font-serif text-ink-600">
+                      碑帖出處：{entry.source_name}
+                    </p>
+                  )}
+
+                  {hasNotes && (
+                    <p className="text-sm font-serif text-ink-800 bg-paper-100/80 p-3 rounded-xl border border-paper-200 whitespace-pre-wrap break-words leading-relaxed">
+                      {entry.notes}
+                    </p>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={() => setIsEditing(true)}
@@ -291,6 +307,20 @@ export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
                     ))}
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-serif text-ink-600 mb-1">
+                  說明 / 備註
+                </label>
+                <textarea
+                  rows={2}
+                  maxLength={200}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="輸入臨帖重點或備註..."
+                  className="w-full px-3 py-2 rounded-xl bg-white border border-paper-300 font-serif text-sm resize-none"
+                />
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

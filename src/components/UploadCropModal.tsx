@@ -46,6 +46,7 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
   const [zhuyinCandidates, setZhuyinCandidates] = useState<string[]>([]);
   const [sourceName, setSourceName] = useState('');
   const [scriptType, setScriptType] = useState('');
+  const [notes, setNotes] = useState('');
   const [showBopomofoPad, setShowBopomofoPad] = useState(false);
 
   // 處理狀態與錯誤訊息
@@ -66,6 +67,7 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
     setZhuyinCandidates([]);
     setSourceName('');
     setScriptType('');
+    setNotes('');
     setErrorMessage(null);
     setIsSubmitting(false);
   }, [rawImageSrc]);
@@ -94,7 +96,6 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
   const applySingleCharAndZhuyin = (rawVal: string) => {
     const trimmed = rawVal.trim();
     const chars = Array.from(trimmed);
-    // 若使用者貼上或輸入超過 1 個字，只取最後輸入或第一個有效單字
     const singleChar = chars.length > 0 ? chars[0] : '';
     setCharInput(singleChar);
 
@@ -110,7 +111,6 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
   const handleCharChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     if (isComposing) {
-      // 中文輸入法組字中暫存，待選字完成 (onCompositionEnd) 立即截斷為 1 個字
       setCharInput(val);
       return;
     }
@@ -159,6 +159,7 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
         zhuyin: zhuyinInput.trim(),
         source_name: sourceName.trim() || undefined,
         script_type: scriptType || undefined,
+        notes: notes.trim() || undefined,
         imageBlob: blob,
       });
       onSuccess(created);
@@ -414,6 +415,21 @@ export const UploadCropModal: React.FC<UploadCropModalProps> = ({
                   ))}
                 </select>
               </div>
+            </div>
+
+            {/* 說明 / 備註（選填） */}
+            <div>
+              <label className="block text-xs font-serif font-bold text-ink-800 mb-1">
+                說明 / 備註（選填）
+              </label>
+              <textarea
+                rows={2}
+                maxLength={200}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="例如：注意起筆藏鋒、結構左窄右寬..."
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-paper-300 font-serif text-sm text-ink-900 focus:outline-none focus:border-ink-900 resize-none"
+              />
             </div>
           </form>
         </div>

@@ -11,9 +11,13 @@ create table if not exists public.calligraphy_entries (
     bopomofo_initial varchar(2) not null,        -- 注音首符號（例如：ㄩ，由前端上傳前自動提取）
     source_name varchar(50),                     -- 碑帖或作品名稱（選填，例如：蘭亭序）
     script_type varchar(20),                     -- 書體（選填，例如：行書、草書、楷書）
+    notes text,                                  -- 說明 / 備註（選填，自行填入一段文字備註）
     image_url text not null,                     -- 圖片於 Storage 的公開存取網址
     created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- 若資料表先前已建立，確保補上 notes 欄位
+alter table public.calligraphy_entries add column if not exists notes text;
 
 -- 2. 建立索引加速檢索
 create index if not exists idx_calligraphy_char on public.calligraphy_entries(char);
