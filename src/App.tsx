@@ -42,9 +42,11 @@ export const App: React.FC = () => {
   const [activeEntry, setActiveEntry] = useState<CalligraphyEntry | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
-  // 側邊通訊錄快速索引列 (Alphabet Index Bar) 當前高亮注音
+  // 側邊通訊錄快速索引列 (Alphabet Index Bar) 當前高亮注音與程式平滑捲動鎖定
   const [activeScrollInitial, setActiveScrollInitial] = useState<string>('');
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  const manualScrollLockRef = useRef<string | null>(null);
+  const manualScrollTimerRef = useRef<number | null>(null);
 
   const { isConfigured } = getSupabaseConfig();
 
@@ -135,7 +137,7 @@ export const App: React.FC = () => {
     return ordered;
   }, [entries]);
 
-  // 5B. 使用 IntersectionObserver 監聽視窗捲動，即時更新側邊注音索引列的 Active 狀態
+  // 5B. 使用 IntersectionObserver + 視窗捲動監聽，解決頁面最底部最後幾個小分組無法滾到視窗最頂端而跳回上一個注音的問題
   useEffect(() => {
     if (groupedSections.length === 0) {
       setActiveScrollInitial('');
@@ -150,6 +152,15 @@ export const App: React.FC = () => {
 
     const observer = new IntersectionObserver(
       (observedEntries) => {
+        // 若使用者剛點擊側邊索引列正在平滑捲動中，保持使用者點擊的目標高亮，避免被上方區塊搶走焦點
+        if (manualScrollLockRef.current) return;
+
+        // 若已經滾動到頁面最底部，且最後一個分組已在畫面中，直接保持最後一個分組或當前位置
+        const isAtBottom =
+          window.innerHeight + window.scrollY >=
+          document.documentElement.scrollHeight - 24;
+        if (isAtBottom) return;
+
         const visible = observedEntries
           .filter((e) => e.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
@@ -170,13 +181,54 @@ export const App: React.FC = () => {
       if (el) observer.observe(el);
     }
 
-    return () => observer.disconnect();
+    // 當使用者手動滑動滾輪或觸控滑動時，解除點擊鎖定；若滑到底部則自動高亮最後一個分組
+    const unlockManualScroll = () => {
+      if (manualScrollLockRef.current) {
+        manualScrollLockRef.current = null;
+        if (manualScrollTimerRef.current) {
+          window.clearTimeout(manualScrollTimerRef.current);
+          manualScrollTimerRef.current = null;
+        }
+      }
+    };
+
+    const handleWindowScroll = () => {
+      if (manualScrollLockRef.current) return;
+      const isAtBottom =
+        window.innerHeight + window.scrollY >=
+        document.documentElement.scrollHeight - 16;
+      if (isAtBottom && groupedSections.length > 0) {
+        setActiveScrollInitial(
+          groupedSections[groupedSections.length - 1].initial
+        );
+      }
+    };
+
+    window.addEventListener('wheel', unlockManualScroll, { passive: true });
+    window.addEventListener('touchmove', unlockManualScroll, { passive: true });
+    window.addEventListener('scroll', handleWindowScroll, { passive: true });
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('wheel', unlockManualScroll);
+      window.removeEventListener('touchmove', unlockManualScroll);
+      window.removeEventListener('scroll', handleWindowScroll);
+    };
   }, [groupedSections]);
 
   // 點擊側邊快速索引列平滑捲動至對應注音區塊錨點
   const handleScrollToSection = (symbol: string) => {
     const targetEl = sectionRefs.current[symbol];
     if (targetEl) {
+      // 鎖定目標注音高亮 750ms，防止頁面底部最後幾個小分組因無法滾到頂部而被上一個注音覆蓋高亮
+      manualScrollLockRef.current = symbol;
+      if (manualScrollTimerRef.current) {
+        window.clearTimeout(manualScrollTimerRef.current);
+      }
+      manualScrollTimerRef.current = window.setTimeout(() => {
+        manualScrollLockRef.current = null;
+      }, 750);
+
       setActiveScrollInitial(symbol);
       targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
