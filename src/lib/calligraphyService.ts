@@ -91,6 +91,32 @@ export async function fetchCalligraphyEntries(params: {
 }
 
 /**
+ * 查詢目前整個字帖庫中所有已收錄的注音首符號 (bopomofo_initial) 集合
+ * 確保切換單一注音篩選時，其他已有字帖的注音紅點不會消失
+ */
+export async function fetchAvailableInitials(): Promise<Set<string>> {
+  const { isConfigured } = getSupabaseConfig();
+  if (!isConfigured) {
+    const list = getLocalDemoEntries();
+    return new Set(list.map((item) => item.bopomofo_initial).filter(Boolean));
+  }
+
+  const { data, error } = await supabase
+    .from('calligraphy_entries')
+    .select('bopomofo_initial');
+
+  if (error || !data) {
+    return new Set();
+  }
+
+  return new Set(
+    data
+      .map((row: { bopomofo_initial: string }) => row.bopomofo_initial)
+      .filter(Boolean)
+  );
+}
+
+/**
  * 上傳 WebP 字帖影像至 Supabase Storage 並將紀錄寫入 calligraphy_entries
  */
 export async function createCalligraphyEntry(

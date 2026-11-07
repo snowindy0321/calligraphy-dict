@@ -9,7 +9,10 @@ import {
   Loader2,
 } from 'lucide-react';
 import { CalligraphyEntry } from './types';
-import { fetchCalligraphyEntries } from './lib/calligraphyService';
+import {
+  fetchCalligraphyEntries,
+  fetchAvailableInitials,
+} from './lib/calligraphyService';
 import { supabase, getSupabaseConfig } from './lib/supabase';
 import { BOPOMOFO_SYMBOLS } from './constants/bopomofo';
 import { BopomofoNavBar } from './components/BopomofoNavBar';
@@ -23,6 +26,9 @@ export const App: React.FC = () => {
   const [selectedInitial, setSelectedInitial] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [entries, setEntries] = useState<CalligraphyEntry[]>([]);
+  const [availableInitialsSet, setAvailableInitialsSet] = useState<Set<string>>(
+    () => new Set()
+  );
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -62,6 +68,20 @@ export const App: React.FC = () => {
       setToastMessage((prev) => (prev === msg ? null : prev));
     }, 3200);
   };
+
+  // 獨立載入全域已收錄的注音首字集合，確保切換單一注音篩選時其他注音紅點不會消失
+  const refreshAvailableInitials = useCallback(async () => {
+    try {
+      const set = await fetchAvailableInitials();
+      setAvailableInitialsSet(set);
+    } catch {
+      // 忽略錯誤
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshAvailableInitials();
+  }, [refreshAvailableInitials]);
 
   const loadEntries = useCallback(async () => {
     setIsLoading(true);
@@ -114,11 +134,6 @@ export const App: React.FC = () => {
     }
     return ordered;
   }, [entries]);
-
-  const availableInitialsSet = useMemo(
-    () => new Set(groupedSections.map((g) => g.initial)),
-    [groupedSections]
-  );
 
   // 5B. 使用 IntersectionObserver 監聽視窗捲動，即時更新側邊注音索引列的 Active 狀態
   useEffect(() => {
@@ -180,17 +195,20 @@ export const App: React.FC = () => {
   const handleCreated = (newEntry: CalligraphyEntry) => {
     showToast(`已成功收錄「${newEntry.char}（${newEntry.zhuyin}）」字帖！`);
     loadEntries();
+    refreshAvailableInitials();
   };
 
   const handleUpdated = (updated: CalligraphyEntry) => {
     setActiveEntry(updated);
     showToast(`已更新「${updated.char}」字帖資訊`);
     loadEntries();
+    refreshAvailableInitials();
   };
 
   const handleDeleted = (_deletedId: string) => {
     showToast('已刪除該筆字帖紀錄與雲端圖檔');
     loadEntries();
+    refreshAvailableInitials();
   };
 
   const displayUsername = userEmail ? userEmail.split('@')[0] : null;
